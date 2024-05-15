@@ -47,6 +47,9 @@ pip install numpy pandas matplotlib statsmodels scipy
 - Сумма остатков SARIMA: `172.13576143392078`
 ![SARIMA_remains.png](images%2FSARIMA_remains.png)
 ------------------------------
+### Прогноз SARIMA
+![SARIMA_test.png](images%2FSARIMA_test.png)
+------------------------------
 ### Линейная регрессия
 - Сумма остатков линейной регрессии на время: `2.4840574042173102e-11`
 ![linreg.png](images%2Flinreg.png)
