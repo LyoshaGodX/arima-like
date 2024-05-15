@@ -16,12 +16,12 @@ def preprocess_data(df):
     Преобразует данные в словарь, создает массивы x и y.
     Возвращает словарь данных, массивы x и y.
     """
-    data = df.set_index('Год').T.to_dict()  # Convert DataFrame to dictionary
+    data = df.set_index('Год').T.to_dict()
     x, y = [], []
     january_2008_value = None
 
-    for year, values in data.items():  # Iterate over the dictionary
-        year = int(year)  # Convert year to integer
+    for year, values in data.items():
+        year = int(year)
         for month, value in values.items():
             if year > 1997:
                 x.append(f"{year}-{month}")
@@ -37,7 +37,6 @@ def preprocess_data(df):
 
     y = np.array(y)
 
-    # Remove corresponding x values where y is NaN
     x = [xi for xi, yi in zip(x, y) if not np.isnan(yi)]
     y = y[~np.isnan(y)]
 

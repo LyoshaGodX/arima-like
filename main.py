@@ -1,4 +1,8 @@
+import numpy as np
+import pandas as pd
+import statsmodels.api as sm
 from matplotlib import pyplot as plt
+from statsmodels.stats.diagnostic import acorr_ljungbox, het_goldfeldquandt
 from data_processing import read_data, preprocess_data, box_cox_transform, seasonal_differencing
 from visualization import plot_timeseries, plot_residuals
 from arima_modeling import arima_model, sarima_model
@@ -61,6 +65,27 @@ def main():
     plot_residuals(x_train, sarima_model_residuals, "Остатки SARIMA")
     print(f"Сумма остатков SARIMA: {sum(sarima_model_residuals)}")
     print("------------------------------")
+
+    # Тест Льюнга-Бокса
+    lb_test = acorr_ljungbox(sarima_model_residuals, lags=10)
+    lb_stat = lb_test['lb_stat'][1]
+    p_value = lb_test['lb_pvalue'][1]
+
+    if p_value < 0.05:
+        print(f"lb-test = {lb_stat}, p = {p_value}. Не можем отвергнуть H0: остатки распределяются независимо")
+    else:
+        print(f"lb-test = {lb_stat}, p = {p_value}. Отвергаем H0: серия остатков не является белым шумом")
+
+    # Тест Гольдфельда-Квандта
+    x_train = pd.to_datetime(x_train)
+    x_train = x_train.view(np.int64) // 10 ** 9
+    X_train = sm.add_constant(x_train)  # Добавляем константу к вектору x_train
+    gq_test = het_goldfeldquandt(sarima_model_residuals, X_train)
+
+    if gq_test[1] < 0.05:
+        print(f"F-stat = {gq_test[0]}, p = {gq_test[1]}. Не можем отвергнуть H0: остатки гомоскедастичны")
+    else:
+        print(f"F-stat = {gq_test[0]}, p = {gq_test[1]}. Отвергаем H0: остатки: остатки гетероскедастичны")
 
     # Прогнозирование на тестовых данных
     forecast = sarima_model_fit.predict(start=len(y_train), end=len(y_train) + len(y_test) - 1)

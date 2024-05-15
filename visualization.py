@@ -8,8 +8,8 @@ def plot_timeseries(x, y, title, ylabel):
     plt.xlabel("Time")
     plt.ylabel(ylabel)
     plt.grid(True)
-    labels = [x[i] if i%12 == 0 else "" for i in range(len(x))]  # Generate labels
-    plt.xticks(range(len(x)), labels, rotation=45, fontsize=8)  # Set x-ticks
+    labels = [x[i] if i%12 == 0 else "" for i in range(len(x))]
+    plt.xticks(range(len(x)), labels, rotation=45, fontsize=8)
     plt.legend()
     plt.tight_layout()
 
@@ -18,7 +18,6 @@ def plot_residuals(x, residuals, title):
     labels = [str(i) for i in range(1998, 1999 + len(x) // 12)]
     ticks = range(0, len(x), 12)
 
-    # Ensure the number of labels matches the number of ticks
     if len(ticks) > len(labels):
         ticks = ticks[:len(labels)]
     elif len(labels) > len(ticks):
