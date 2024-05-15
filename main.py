@@ -1,305 +1,91 @@
-import pandas as pd
-import openpyxl
-import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import adfuller
-import numpy as np
-from scipy.stats import boxcox
-import statsmodels.api as sm
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-from pmdarima import auto_arima
+from matplotlib import pyplot as plt
+from data_processing import read_data, preprocess_data, box_cox_transform, seasonal_differencing
+from visualization import plot_timeseries, plot_residuals
+from arima_modeling import arima_model, sarima_model
+from regression import linear_regression, polynomial_regression
+from utils import adf_test, plot_acf_pacf
 
-# Чтение данных из файла Excel
-df = pd.read_excel("Data.xlsx", index_col=0)
 
-# Преобразование данных в словарь
-data = df.to_dict()
+def main():
+    # Чтение данных
+    df = read_data("Data.csv")
 
-x = []
-y = []
+    # Предобработка данных
+    data, x, y = preprocess_data(df)
 
-january_2008_value = None
+    # Разделение данных на обучающую и тестовую выборки
+    x_train, x_test = x[:-12], x[-12:]
+    y_train, y_test = y[:-12], y[-12:]
 
-for year, values in data.items():
-    for month, value in values.items():
-        if year > 1997:
-            x.append(f"{year}-{month}")
-            if year == 2008 and month == 1:
-                january_2008_value = value
-            if year < 1998:
-                y.append(value * 1000)
-                continue
-            y.append(value)
+    # Исходный временной ряд
+    plot_timeseries(x, y, "Относительная номинальная заработная плата от 2008 года", "Проценты")
+    print("Исходный временной ряд")
+    adf_test(y)
+    print("------------------------------")
 
-if january_2008_value is not None:
-    # Преобразование значений в проценты от января 2008 года
-    y = [(val / january_2008_value) * 100 for val in y]
+    # Преобразование Бокса-Кокса
+    y_boxcox, lmda = box_cox_transform(y)
+    plot_timeseries(x, y_boxcox, "Преобразование Бокса-Кокса", "Проценты")
+    print("Преобразованный ряд с помощью Бокса-Кокса")
+    adf_test(y_boxcox)
+    print(f"Lambda: {lmda}")
+    print("------------------------------")
 
-# Удаление пропусков
-y = np.array(y)
-y = y[~np.isnan(y)]
+    # Сезонное дифференцирование
+    y_seasonal = seasonal_differencing(y_boxcox, 12)
+    x_seasonal = x[12:]
+    plot_timeseries(x_seasonal, y_seasonal, "Первое сезонное дифференцирование", "Проценты")
+    print("Сезонное дифференцирование, период 12 месяцев")
+    adf_test(y_seasonal)
+    print("------------------------------")
 
-x = np.arange(len(y))
+    # Второе сезонное дифференцирование
+    y_seasonal_2 = seasonal_differencing(y_seasonal, 12)
+    x_seasonal_2 = x_seasonal[12:]
+    plot_timeseries(x_seasonal_2, y_seasonal_2, "Второе сезонное дифференцирование", "Проценты")
+    print("Второе сезонное дифференцирование, период 12 месяцев")
+    adf_test(y_seasonal_2)
+    print("------------------------------")
 
-# Создание меток для годов
-labels = []
-for i in range(1998, 2024):
-    labels.append(f'{i}')
+    # Построение графиков ACF и PACF
+    plot_acf_pacf(y_seasonal_2, "Каррелограмма ACF для трансформированного ряда",
+                  "Каррелограмма PACF для трансформированного ряда")
 
-# График исходных данных
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x, y)
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Относительная номинальная заработная плата от 2008 года')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend(['Проценты'])
+    # Модель ARIMA
+    arima_model(y_seasonal_2, x_seasonal_2, (10, 0, 5),
+                "Модель ARIMA на трансформированном ряде")
 
-# Критерий Дика-Фуллера
-stat = adfuller(y)
+    # Модель SARIMA
+    sarima_model_fit, sarima_model_residuals = sarima_model(y_train, x_train, (10, 0, 5), (2, 2, 1, 12),
+                                          "Модель SARIMA на обучающих данных", True)
+    plot_residuals(x_train, sarima_model_residuals, "Остатки SARIMA")
+    print(f"Сумма остатков SARIMA: {sum(sarima_model_residuals)}")
+    print("------------------------------")
 
-# Вывод результатов
-print('Исходный временной ряд')
-print('ADF Statistic:', stat[0])
-print('p-value:', stat[1])
-print('------------------------------')
+    # Прогнозирование на тестовых данных
+    forecast = sarima_model_fit.predict(start=len(y_train), end=len(y_train) + len(y_test) - 1)
 
-# Применение преобразования Бокса-Кокса
-y_boxcox, lmda = boxcox(y)
+    # Визуализация реальных данных и прогноза на тестовых данных
+    plt.figure(figsize=(12, 6))
+    plt.plot(x_test, y_test, label="Реальные данные")
+    plt.plot(x_test, forecast, color='red', label="Прогноз")
+    plt.title("Прогноз на тестовых данных")
+    plt.xlabel("Time")
+    plt.ylabel("Проценты")
+    plt.grid(True)
+    labels = [x_test[i] for i in range(len(x_test))]
+    plt.xticks(range(len(x_test)), labels, rotation=45, fontsize=8)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
-# Критерий Дика-Фуллера
-stat = adfuller(y_boxcox)
+    # Линейная регрессия
+    linear_regression(x, y, "Регрессия на время, линейная")
 
-# Вывод результатов
-print('Преобразованный ряд с помощью Бокса-Кокса')
-print('ADF Statistic:', stat[0])
-print('p-value:', stat[1])
-print("Lambda:", lmda)
-print('------------------------------')
+    # Полиномиальная регрессия
+    degree = 2
+    polynomial_regression(x, y, degree, f"Полиноминальная регрессия на время (Степень: {degree})")
 
-# График Бокса-Кокса
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x, y_boxcox)
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Преобразование Бокса-Кокса')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend(['Проценты'])
 
-# Сезонное дифференцирование
-y_seasonal = pd.Series(y_boxcox).diff(12).dropna().values
-x_seasonal = np.arange(len(y_seasonal))
-
-# Критерий Дика-Фуллера
-stat = adfuller(y_seasonal)
-
-# Вывод результатов
-print('Сезонное дифференцирование, период 12 месяцев')
-print('ADF Statistic:', stat[0])
-print('p-value:', stat[1])
-print('------------------------------')
-
-# График после сезонного дифференцирования
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x_seasonal, y_seasonal)
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Первое сезонное дифференцирование')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend(['Проценты'])
-plt.show()
-
-# Еще одно сезонное дифференцирование
-y_seasonal_2 = pd.Series(y_seasonal).diff(12).dropna().values
-x_seasonal_2 = np.arange(len(y_seasonal_2))
-# Критерий Дика-Фуллера
-stat = adfuller(y_seasonal_2)
-
-# Вывод результатов
-print('Второе сезонное дифференцирование, период 12 месяцев')
-print('ADF Statistic:', stat[0])
-print('p-value:', stat[1])
-print('------------------------------')
-
-# График после сезонного дифференцирования
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x_seasonal_2, y_seasonal_2)
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Второе сезонное дифференцирование')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend(['Проценты'])
-plt.show()
-
-# Построение графика ACF для трансформированного ряда
-plt.figure(figsize=(10, 6), dpi=500)
-plot_acf(y_seasonal_2)
-plt.xlabel('Лаг')
-plt.ylabel('ACF')
-plt.title('Каррелограмма ACF для трансформированного ряда')
-plt.show()
-
-# Построение графика PACF для трансформированного ряда
-plt.figure(figsize=(10, 6), dpi=500)
-plot_pacf(y_seasonal_2)
-plt.xlabel('Лаг')
-plt.ylabel('PACF')
-plt.title('Каррелограмма PACF для трансформированного ряда')
-plt.show()
-
-# Модель ARIMA на аналитических параметрах
-model_arima_analytical = sm.tsa.ARIMA(y_seasonal_2, order=(10, 0, 5))
-model_arima_analytical_fit = model_arima_analytical.fit()
-ARIMA_aic_analytical = model_arima_analytical_fit.aic
-
-# Прогнозирование
-forecast_arima_analytical = model_arima_analytical_fit.predict(start=0, end=len(y_seasonal_2) - 1)
-
-# График модели ARIMA на аналитических параметрах
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x_seasonal_2, y_seasonal_2)
-plt.plot(range(0, len(y_seasonal_2)), forecast_arima_analytical, color='red')
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Модель ARIMA на транформированном ряде, аналитические параметры')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend(['Проценты', 'Прогноз'])
-plt.show()
-
-print('ARIMA, трансформированные данные, аналитические параметры')
-print('p, d, q: 10, 0, 5')
-print(f'AIC тест: {ARIMA_aic_analytical}')
-print('------------------------------')
-
-# Модель SARIMA
-model_sarima_analytical = sm.tsa.SARIMAX(y, order=(10, 0, 5), seasonal_order=(2, 2, 1, 12))
-model_sarima_analytical_fit = model_sarima_analytical.fit()
-SARIMA_aic_analytical = model_sarima_analytical_fit.aic
-
-# Прогнозирование
-predictions_sarima_analytical = model_sarima_analytical_fit.predict(start=24, end=len(y) -1)
-
-# График модели SARIMA
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x, y)
-plt.plot(range(24, len(y)), predictions_sarima_analytical)
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Модель SARIMA на исходных данных, аналитические параметры')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend(['Реальные данные', 'Прогноз'])
-plt.show()
-
-print('SARIMA, исходные данные, аналитические параметры')
-print('p, d, q, P, D, Q, S: 10, 0, 5, 2, 2, 1, 12')
-print(f'AIC тест: {SARIMA_aic_analytical}')
-print('------------------------------')
-
-# Автоподбор параметров SARIMA
-model_sarima_auto = auto_arima(y, seasonal=True)
-model_sarima_auto_fit = model_sarima_auto.fit(y)
-SARIMA_aic_auto = model_sarima_auto_fit.aic()
-
-print('SARIMA, исходные данные, автоматические параметры')
-print('p, d, q, P, D, Q, S: 2, 1, 4, 0, 0, 0, 0')
-print(f'AIC тест: {SARIMA_aic_auto}')
-print('------------------------------')
-
-# Остатки модели SARIMA на исходных данных
-model_sarima_analytical_residuals = model_sarima_analytical_fit.resid
-
-# График остатков
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x, model_sarima_analytical_residuals)
-plt.xlabel('Год')
-plt.ylabel('Остатки')
-plt.title('Остатки SARIMA, исходные данные, аналитические параметры')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.show()
-
-# Вывод суммы остатков в консоль
-print('Сумма остатков SARIMA, аналитические параметры', np.sum(model_sarima_analytical_residuals))
-print('------------------------------')
-
-# Линейная регрессия на исходных данных
-x = sm.add_constant(x)  # Регрессия на время
-model = sm.OLS(y, x)
-results = model.fit()
-y_pred = results.predict(x)
-
-# График линейной регрессии
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x[:, 1], y, label='Исходные данные')
-plt.plot(x[:, 1], y_pred, label='Линейная регрессия')
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title('Регрессия на время, линейная')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend()
-plt.show()
-
-# Остатки от линейной регрессии
-residuals = y - y_pred
-
-# График остатков от линейной регрессии
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x[:, 1], residuals)
-plt.xlabel('Год')
-plt.ylabel('Остатки')
-plt.title('Остатки линейной регрессии на время')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.show()
-
-# Сумма остатков линейной регрессии
-residual_sum = np.sum(residuals)
-print('Сумма остатков линейной регрессии на время:', residual_sum)
-print('------------------------------')
-
-# Полиноминальная регрессия на исходных данных
-degree = 2  # Степень многочлена
-x_poly = sm.add_constant(x)
-x_poly = sm.add_constant(x_poly) # Регрессия на время
-for i in range(2, degree + 1):
-    x_poly = np.column_stack((x_poly, x ** i))
-
-poly_model = sm.OLS(y, x_poly)
-poly_model_fit = poly_model.fit()
-
-y_poly_pred = poly_model_fit.predict(x_poly)
-
-# График полиноминальной регрессии
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x[:, 1], y, label='Исходные данные')
-plt.plot(x[:, 1], y_poly_pred, label='Полиноминальная регрессия')
-plt.xlabel('Год')
-plt.ylabel('Относительная номинальная заработная плата')
-plt.title(f'Полиноминальная регрессия на время (Степень: {degree})')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.legend()
-plt.show()
-
-# Остатки полиноминальной регрессии
-poly_residuals = y - y_poly_pred
-
-plt.figure(figsize=(10, 6), dpi=500)
-plt.plot(x[:, 1], poly_residuals)
-plt.xlabel('Год')
-plt.ylabel('Остатки')
-plt.title('Остатки полиноминальной регрессии на время')
-plt.xticks(range(0, len(x), 12), labels, rotation=45, fontsize=8)
-plt.yticks(fontsize=8)
-plt.show()
-
-# Сумма остатков полиноминальной регрессии
-poly_residual_sum = np.sum(poly_residuals)
-print('Сумма полиноминальной регрессии на время:', poly_residual_sum)
-print('------------------------------')
+if __name__ == "__main__":
+    main()
